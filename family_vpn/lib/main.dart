@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:v2ray_myanmar/v2ray_myanmar.dart';
 
 void main() {
@@ -38,8 +39,15 @@ class VpnDashboard extends StatefulWidget {
 
 class _VpnDashboardState extends State<VpnDashboard> {
   static const String _profileAssetPath = 'assets/vpn_profile.json';
+  static const String _profileUrl =
+      'https://api.kundi.lucartmax.kz/vpn/profile.json';
+  static const Duration _profileRequestTimeout = Duration(seconds: 6);
+  static const Duration _watchdogInterval = Duration(seconds: 5);
+  static const Duration _stalledTrafficThreshold = Duration(seconds: 25);
+  static const int _minimumOutgoingStallSpeed = 1024;
 
   late final V2rayMyanmar v2ray;
+  Timer? _watchdogTimer;
 
   V2RayStatus v2rayStatus = V2RayStatus();
   bool _isCoreReady = false;
@@ -48,10 +56,12 @@ class _VpnDashboardState extends State<VpnDashboard> {
   bool _shouldStayConnected = false;
   bool _isRefreshing = false;
   String? _profileError;
+  String _profileSource = 'asset';
   VpnProfile? _profile;
   VpnEndpoint? _activeEndpoint;
   int _totalDown = 0;
   int _totalUp = 0;
+  DateTime? _lastIncomingTrafficAt;
 
   @override
   void initState() {
@@ -63,7 +73,7 @@ class _VpnDashboardState extends State<VpnDashboard> {
     v2ray = V2rayMyanmar(onStatusChanged: _handleStatusChanged);
     await Future.wait(<Future<void>>[
       v2ray.initializeV2Ray(),
-      _loadProfile(),
+      _loadProfile(showLoader: true),
     ]);
 
     if (!mounted) {
@@ -73,13 +83,18 @@ class _VpnDashboardState extends State<VpnDashboard> {
     setState(() {
       _isCoreReady = true;
     });
+    _startWatchdog();
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> _loadProfile({required bool showLoader}) async {
+    if (showLoader && mounted) {
+      setState(() {
+        _isProfileLoading = true;
+      });
+    }
+
     try {
-      final raw = await rootBundle.loadString(_profileAssetPath);
-      final json = jsonDecode(raw) as Map<String, dynamic>;
-      final profile = VpnProfile.fromJson(json);
+      final profile = await _fetchProfileWithFallback();
 
       if (!mounted) {
         return;
@@ -102,6 +117,28 @@ class _VpnDashboardState extends State<VpnDashboard> {
     }
   }
 
+  Future<VpnProfile> _fetchProfileWithFallback() async {
+    try {
+      final response = await http
+          .get(Uri.parse(_profileUrl))
+          .timeout(_profileRequestTimeout);
+      if (response.statusCode == 200) {
+        final body = utf8.decode(response.bodyBytes).replaceFirst('\uFEFF', '');
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final profile = VpnProfile.fromJson(json);
+        _profileSource = 'remote';
+        return profile;
+      }
+    } catch (_) {
+      // Fall back to bundled profile when the remote endpoint is unavailable.
+    }
+
+    final raw = await rootBundle.loadString(_profileAssetPath);
+    final json = jsonDecode(raw) as Map<String, dynamic>;
+    _profileSource = 'asset';
+    return VpnProfile.fromJson(json);
+  }
+
   void _handleStatusChanged(V2RayStatus status) {
     final previousState = v2rayStatus.state.toLowerCase();
     final nextState = status.state.toLowerCase();
@@ -114,6 +151,10 @@ class _VpnDashboardState extends State<VpnDashboard> {
           _totalUp += status.uploadSpeed;
         }
       });
+    }
+
+    if (nextState == 'connected' && status.downloadSpeed > 0) {
+      _lastIncomingTrafficAt = DateTime.now();
     }
 
     final lostConnection =
@@ -133,12 +174,18 @@ class _VpnDashboardState extends State<VpnDashboard> {
       return;
     }
 
+    await _loadProfile(showLoader: false);
+    if (_profile == null) {
+      return;
+    }
+
     final granted = await v2ray.requestPermission();
     if (!granted) {
       return;
     }
 
     _shouldStayConnected = true;
+    _lastIncomingTrafficAt = DateTime.now();
     await _connectWithFallback(showFailure: true);
   }
 
@@ -149,6 +196,7 @@ class _VpnDashboardState extends State<VpnDashboard> {
 
     _shouldStayConnected = true;
     _isRefreshing = true;
+    await _loadProfile(showLoader: false);
     await _connectWithFallback(showFailure: !silent);
     _isRefreshing = false;
   }
@@ -188,6 +236,7 @@ class _VpnDashboardState extends State<VpnDashboard> {
             _activeEndpoint = endpoint;
             _isLoading = false;
           });
+          _lastIncomingTrafficAt = DateTime.now();
           return;
         }
 
@@ -272,6 +321,43 @@ class _VpnDashboardState extends State<VpnDashboard> {
     });
   }
 
+  void _startWatchdog() {
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer.periodic(_watchdogInterval, (_) {
+      _checkForStalledIncomingTraffic();
+    });
+  }
+
+  void _checkForStalledIncomingTraffic() {
+    if (!_shouldStayConnected ||
+        _isLoading ||
+        _isRefreshing ||
+        v2rayStatus.state.toLowerCase() != 'connected') {
+      return;
+    }
+
+    final lastIncoming = _lastIncomingTrafficAt;
+    if (lastIncoming == null) {
+      return;
+    }
+
+    final hasOutgoingTraffic =
+        v2rayStatus.uploadSpeed >= _minimumOutgoingStallSpeed;
+    final hasNoIncomingTraffic = v2rayStatus.downloadSpeed == 0;
+    final stalled =
+        DateTime.now().difference(lastIncoming) >= _stalledTrafficThreshold;
+
+    if (hasOutgoingTraffic && hasNoIncomingTraffic && stalled) {
+      unawaited(_refreshConnection(silent: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    _watchdogTimer?.cancel();
+    super.dispose();
+  }
+
   String _fmt(int bytes) {
     if (bytes <= 0) {
       return '0 B';
@@ -340,7 +426,7 @@ class _VpnDashboardState extends State<VpnDashboard> {
     if (_isLoading && _profile != null) {
       return 'Trying ${_profile!.serverNames.length} names on ${_profile!.ports.length} ports';
     }
-    return 'Single VPS mode with JSON profile and automatic refresh';
+    return 'Single VPS mode with $_profileSource JSON profile and automatic refresh';
   }
 
   Widget _buildHeader() {
@@ -478,6 +564,12 @@ class _VpnDashboardState extends State<VpnDashboard> {
           Text(
             'Names: ${profile.serverNames.join(', ')}',
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Profile source: $_profileSource',
+            style: TextStyle(color: Colors.grey[500], fontSize: 11),
             textAlign: TextAlign.center,
           ),
         ],

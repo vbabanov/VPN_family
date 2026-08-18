@@ -17,6 +17,8 @@ migrate_working_dir/
 *.ipr
 *.iws
 .idea/
+.agents/
+.codex/
 
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
@@ -45,3 +47,6 @@ app.*.map.json
 /android/app/release
 /android/key.properties
 *.jks
+*.keystore
+*.apk
+*.aab

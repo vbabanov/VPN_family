@@ -39,7 +39,7 @@ class VpnDashboard extends StatefulWidget {
 class _VpnDashboardState extends State<VpnDashboard> {
   static const String _profileAssetPath = 'assets/vpn_profile.json';
   static const List<String> _profileUrls = <String>[
-    'https://api.kundi.lucartmax.kz/vpn/profile.json',
+    'https://sister.lucartmax.kz/profile.json',
   ];
   static const String _cachedProfileKey = 'last_known_good_vpn_profile';
   static const Duration _profileRequestTimeout = Duration(seconds: 6);

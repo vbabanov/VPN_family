@@ -1,0 +1,24 @@
+name: family_vpn
+description: "Private Android client for Family VPN."
+publish_to: 'none'
+version: 1.1.1+3
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  shared_preferences: ^2.5.5
+  v2ray_myanmar: ^1.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/vpn_profile.json

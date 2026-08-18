@@ -1,0 +1,4 @@
+storeFile=C:/secure/family-vpn-release.jks
+storePassword=CHANGE_ME
+keyAlias=family-vpn
+keyPassword=CHANGE_ME

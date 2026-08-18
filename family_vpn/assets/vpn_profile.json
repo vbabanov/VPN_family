@@ -1,4 +1,5 @@
 {
+  "version": 2,
   "host": "46.247.42.87",
   "uuid": "2d27e4fc-3ba2-4dea-b95b-9d735fc48036",
   "publicKey": "oVhFUmPi8A4iQBfVyeloF56lY89o5Zeu8aLuy_aV_Ww",
@@ -7,9 +8,12 @@
   "fingerprint": "chrome",
   "flow": "xtls-rprx-vision",
   "ports": [2053, 8443, 2083, 2087, 2096],
-  "serverNames": [
-    "www.microsoft.com",
-    "www.cloudflare.com",
-    "google.com"
-  ]
+  "serverNames": ["www.bing.com"],
+  "healthCheckUrls": [
+    "http://connectivitycheck.gstatic.com/generate_204",
+    "https://cp.cloudflare.com/generate_204",
+    "https://www.google.com/generate_204"
+  ],
+  "healthCheckIntervalSeconds": 15,
+  "maxConsecutiveHealthFailures": 2
 }
